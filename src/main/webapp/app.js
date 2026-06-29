@@ -23,8 +23,9 @@ let pendingChunks = [];
 let pdfjsLib = null;
 
 async function initializeHardwareRuntimes() {
-    // Wire the file picker immediately (independent of the heavy model loads).
+    // Wire the file picker + drag-and-drop immediately (independent of model loads).
     document.getElementById("file-input").addEventListener("change", (e) => loadFile(e.target.files[0]));
+    setupDragAndDrop();
     try {
         // 1. Boot the Java Wasm core FIRST so chunking/index math is ready immediately.
         window.updateJavaStatusIndicator("Loading Java Wasm Application Core...");
@@ -62,8 +63,27 @@ async function computeEmbedding(text) {
     return Array.from(output.data);
 }
 
-// Extract text from a dropped/selected file (.pdf via pdf.js, otherwise plain text)
-// and drop it into the textarea so the existing Java pipeline can chunk + index it.
+// Drop a .pdf/.txt anywhere on the textarea to load + auto-index it.
+function setupDragAndDrop() {
+    const box = document.getElementById("doc-input");
+    const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+
+    box.addEventListener("dragover", (e) => { stop(e); box.classList.add("dragover"); });
+    box.addEventListener("dragleave", (e) => { stop(e); box.classList.remove("dragover"); });
+    box.addEventListener("drop", (e) => {
+        stop(e);
+        box.classList.remove("dragover");
+        const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (file) loadFile(file);
+    });
+
+    // Stop a near-miss drop elsewhere from navigating the browser away from the app.
+    window.addEventListener("dragover", (e) => e.preventDefault());
+    window.addEventListener("drop", (e) => e.preventDefault());
+}
+
+// Extract text from a dropped/selected file (.pdf via pdf.js, otherwise plain text),
+// load it into the textarea, then auto-index through the existing Java pipeline.
 async function loadFile(file) {
     if (!file) return;
     const name = (file.name || "").toLowerCase();
@@ -75,8 +95,14 @@ async function loadFile(file) {
             text = await file.text();
         }
         document.getElementById("doc-input").value = text;
-        window.updateJavaStatusIndicator(
-            `Loaded ${text.length} chars from "${file.name}". Click "Chunk & Index" to ingest.`);
+
+        if (javaAppInstance && embeddingPipeline) {
+            window.updateJavaStatusIndicator(`Loaded ${text.length} chars from "${file.name}". Auto-indexing...`);
+            await window.triggerDocumentProcess();
+        } else {
+            window.updateJavaStatusIndicator(
+                `Loaded ${text.length} chars from "${file.name}". Engines still warming — click "Chunk & Index" when ready.`);
+        }
     } catch (err) {
         console.error(err);
         window.updateJavaStatusIndicator("File load error: " + (err && err.message ? err.message : err));

@@ -6,17 +6,22 @@ import java.util.List;
 /**
  * Lightweight, pure-Java in-browser vector store.
  *
- * <p>Handles text chunking, an in-memory primitive vector index, and direct
- * cosine-similarity distance computations using raw {@code float} primitives.
- * No reflection, no dynamic classloading &mdash; TeaVM compiles this statically.</p>
+ * <p>Owns the document chunking, the in-memory primitive vector index, and the
+ * direct cosine-similarity ranking + context assembly &mdash; all using raw
+ * {@code float} primitives. No reflection, no dynamic classloading, so TeaVM
+ * compiles this statically.</p>
+ *
+ * <p>Embeddings themselves are produced asynchronously by Transformers.js on
+ * the JavaScript side; this class is handed the already-computed
+ * {@code float[]} vectors via {@link #indexChunk}.</p>
  */
 public class BrowserVectorDB {
 
     private final List<DocumentChunk> index = new ArrayList<>();
 
     public static class DocumentChunk {
-        public String text;
-        public float[] vector;
+        public final String text;
+        public final float[] vector;
 
         public DocumentChunk(String text, float[] vector) {
             this.text = text;
@@ -25,27 +30,33 @@ public class BrowserVectorDB {
     }
 
     /**
-     * Segments raw content with a sliding character window and pushes each
-     * chunk out to the JavaScript embedding engine for vectorization.
+     * Sliding-window character segmenter. Emits each chunk to the JavaScript
+     * layer (which embeds it asynchronously and calls back into
+     * {@link #indexChunk}).
      */
-    public void chunkAndIndexDocument(String rawContent, int chunkSize, int overlap) {
+    public void chunkAndEmit(String rawContent, int chunkSize, int overlap) {
         if (rawContent == null || rawContent.trim().isEmpty()) return;
 
-        // Simple sliding-window character index segmenter
+        int step = Math.max(1, chunkSize - overlap);
         int start = 0;
         while (start < rawContent.length()) {
             int end = Math.min(start + chunkSize, rawContent.length());
             String textBlock = rawContent.substring(start, end).trim();
-
             if (!textBlock.isEmpty()) {
-                NativeAIBridge.updateUIStatus("Vectorizing chunk at index: " + start);
-                float[] embedding = NativeAIBridge.fetchEmbeddingFromBrowser(textBlock);
-                if (embedding != null) {
-                    index.add(new DocumentChunk(textBlock, embedding));
-                }
+                NativeAIBridge.emitChunk(textBlock);
             }
-            start += (chunkSize - overlap);
+            start += step;
         }
+    }
+
+    /** Stores a chunk together with its precomputed embedding vector. */
+    public void indexChunk(String text, float[] vector) {
+        if (text == null || vector == null || vector.length == 0) return;
+        index.add(new DocumentChunk(text, vector));
+    }
+
+    public int size() {
+        return index.size();
     }
 
     /**

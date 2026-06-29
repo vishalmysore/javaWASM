@@ -11,6 +11,19 @@ The architecture is split into two cleanly separated layers:
 | **Java Wasm Core** (orchestrator) | Java → WasmGC via **TeaVM 0.15.0** | Document model, sliding-window chunking, in-memory primitive vector store, cosine-similarity search, context assembly |
 | **JavaScript Engine Layer** (hardware) | **Transformers.js** + **WebLLM** | Local text embeddings (`Xenova/all-MiniLM-L6-v2`) and SLM inference (`Qwen2.5-0.5B-Instruct` on WebGPU) |
 
+## Features
+
+- **RAG over a document** — paste text or drop a `.pdf`/`.txt`; Java chunks it,
+  Transformers.js embeds it, Java does the cosine retrieval, WebLLM answers.
+- **🧠 Persistent memory** — "Remember" facts and "Recall" them later. Vectors
+  are stored in **IndexedDB** and replayed into the Java vector store on every
+  boot, so memory survives closing the browser. No server, no database, no API.
+- **👥 Multi-agent society** — a Supervisor (in Wasm) plans the pipeline, defines
+  each role's prompt, and merges the outputs of a Researcher, Coder, and Critic
+  agent — all running on the local WebGPU SLM.
+- **Observability** — a "Java Wasm Core Activity" panel shows lines emitted from
+  inside the `.wasm` (chunk counts, cosine scores), plus a `selfTest()` button.
+
 ## Data Flow
 
 ```

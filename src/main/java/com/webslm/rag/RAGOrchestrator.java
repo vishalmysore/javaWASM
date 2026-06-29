@@ -17,11 +17,65 @@ import org.teavm.jso.JSExport;
  */
 public class RAGOrchestrator {
 
+    /** Ephemeral per-session document index (RAG over an uploaded doc). */
     private static final BrowserVectorDB db = new BrowserVectorDB();
+
+    /** Long-term memory index. Rehydrated from IndexedDB by JS on every boot. */
+    private static final BrowserVectorDB memory = new BrowserVectorDB();
 
     public static void main(String[] args) {
         NativeAIBridge.updateUIStatus("Java WasmGC Engine Mounted Successfully.");
         NativeAIBridge.logFromWasm("main(): RAGOrchestrator booted inside WebAssembly GC.");
+        AgentSociety.boot();
+    }
+
+    // ----------------------------------------------------------------
+    // Persistent long-term memory (vectors persisted in IndexedDB by JS)
+    // ----------------------------------------------------------------
+
+    /** Stores a remembered fact + its precomputed embedding in the memory store. */
+    @JSExport
+    public static void rememberFact(String text, String vectorCsv) {
+        memory.indexChunk(text, parseVector(vectorCsv));
+        NativeAIBridge.logFromWasm("rememberFact(): committed to long-term memory (total=" + memory.size() + ")");
+    }
+
+    /** Cosine-recall of the most relevant remembered facts for a query embedding. */
+    @JSExport
+    public static String recallMemory(String queryVectorCsv, int topK) {
+        NativeAIBridge.logFromWasm("recallMemory(): searching " + memory.size() + " long-term memories...");
+        return memory.searchTopContext(parseVector(queryVectorCsv), topK);
+    }
+
+    @JSExport
+    public static int memoryCount() {
+        return memory.size();
+    }
+
+    @JSExport
+    public static void clearMemory() {
+        memory.clearIndex();
+        NativeAIBridge.logFromWasm("clearMemory(): long-term memory wiped.");
+    }
+
+    // ----------------------------------------------------------------
+    // Multi-agent society (supervisor logic lives in AgentSociety).
+    // Thin @JSExport wrappers so TeaVM detects them on the main class.
+    // ----------------------------------------------------------------
+
+    @JSExport
+    public static String supervisorPlan(String task) {
+        return AgentSociety.supervisorPlan(task);
+    }
+
+    @JSExport
+    public static String agentSystemPrompt(String role) {
+        return AgentSociety.agentSystemPrompt(role);
+    }
+
+    @JSExport
+    public static String assembleFinal(String task, String research, String code, String critique) {
+        return AgentSociety.assembleFinal(task, research, code, critique);
     }
 
     /**

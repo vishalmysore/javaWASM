@@ -32,6 +32,9 @@ async function initializeHardwareRuntimes() {
         javaAppInstance = await TeaVM.wasmGC.load("wasm-gc/classes.wasm");
         javaAppInstance.exports.main([]);
 
+        // Restore long-term memory from a previous session (IndexedDB -> Wasm store).
+        await rehydrateMemory();
+
         // 2. Embedding model (Transformers.js, streamed from the HF CDN).
         window.updateJavaStatusIndicator(`Spawning Feature Extractor (${EMBED_MODEL_ID})...`);
         embeddingPipeline = await pipeline("feature-extraction", EMBED_MODEL_ID);
@@ -162,6 +165,181 @@ window.verifyWasmCore = function() {
     }
     const result = javaAppInstance.exports.selfTest(); // String built inside the .wasm
     window.updateJavaStatusIndicator(result);
+};
+
+// ============================================================
+//  Persistent long-term memory  (IndexedDB <-> Java vector store)
+// ============================================================
+const MEM_DB_NAME = "javawasm-memory";
+const MEM_STORE = "facts";
+
+function openMemoryDB() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(MEM_DB_NAME, 1);
+        req.onupgradeneeded = () => req.result.createObjectStore(MEM_STORE, { keyPath: "id", autoIncrement: true });
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function memAdd(text, vector) {
+    const db = await openMemoryDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(MEM_STORE, "readwrite");
+        tx.objectStore(MEM_STORE).add({ text, vector, ts: Date.now() });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+async function memGetAll() {
+    const db = await openMemoryDB();
+    return new Promise((resolve, reject) => {
+        const req = db.transaction(MEM_STORE, "readonly").objectStore(MEM_STORE).getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function memClearAll() {
+    const db = await openMemoryDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(MEM_STORE, "readwrite");
+        tx.objectStore(MEM_STORE).clear();
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+// On every boot: pull persisted facts from IndexedDB and replay them into the
+// Wasm vector store using the stored vectors (no re-embedding needed).
+async function rehydrateMemory() {
+    try {
+        const facts = await memGetAll();
+        for (const f of facts) {
+            javaAppInstance.exports.rememberFact(f.text, f.vector.join(","));
+        }
+        updateMemoryCount();
+        if (facts.length) {
+            window.updateJavaStatusIndicator(`Restored ${facts.length} memory item(s) from IndexedDB into the Wasm vector store.`);
+        }
+    } catch (err) {
+        console.warn("Memory rehydrate skipped:", err);
+    }
+}
+
+function updateMemoryCount() {
+    const el = document.getElementById("memory-count");
+    if (el && javaAppInstance) el.textContent = `Memories stored: ${javaAppInstance.exports.memoryCount()}`;
+}
+
+function escapeHtml(s) {
+    return (s || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+}
+
+window.triggerRemember = async function() {
+    if (!enginesReady()) return;
+    const input = document.getElementById("memory-input");
+    const text = input.value.trim();
+    if (!text) { window.updateJavaStatusIndicator("Type something for me to remember."); return; }
+
+    window.updateJavaStatusIndicator("Embedding & persisting memory...");
+    const vector = await computeEmbedding(text);
+    await memAdd(text, vector);                                   // persisted in IndexedDB
+    javaAppInstance.exports.rememberFact(text, vector.join(",")); // live in the Wasm store
+    input.value = "";
+    updateMemoryCount();
+    window.updateJavaStatusIndicator(
+        `Remembered. ${javaAppInstance.exports.memoryCount()} item(s) saved — they survive a browser restart.`);
+};
+
+window.triggerRecall = async function() {
+    if (!enginesReady()) return;
+    const query = document.getElementById("memory-query").value.trim();
+    if (!query) { window.updateJavaStatusIndicator("Ask a question to recall."); return; }
+    if (javaAppInstance.exports.memoryCount() === 0) {
+        window.updateJavaStatusIndicator("No memories stored yet — tell me something to remember first.");
+        return;
+    }
+
+    window.updateJavaStatusIndicator("Computing query embedding...");
+    const vector = await computeEmbedding(query);
+    const recalled = javaAppInstance.exports.recallMemory(vector.join(","), 3); // Java cosine recall
+
+    const box = document.getElementById("memory-output");
+    box.innerHTML = `<b>Recalled from memory (IndexedDB → Wasm vector search):</b><pre>${escapeHtml(recalled) || "(nothing relevant)"}</pre>`;
+
+    if (llmEngine && recalled) {
+        box.innerHTML += "<b>Assistant:</b> ";
+        const stream = await llmEngine.chat.completions.create({
+            messages: [
+                { role: "system", content: "You are the user's personal memory assistant. Answer using ONLY the remembered facts provided. If the answer isn't in them, say you don't have it in memory." },
+                { role: "user", content: `Remembered facts:\n${recalled}\n\nQuestion: ${query}` }
+            ],
+            stream: true, temperature: 0.3, top_p: 0.8
+        });
+        for await (const chunk of stream) {
+            box.innerHTML += chunk.choices[0]?.delta?.content || "";
+        }
+    }
+    window.updateJavaStatusIndicator("Recall complete.");
+};
+
+window.clearMemory = async function() {
+    await memClearAll();
+    if (javaAppInstance) javaAppInstance.exports.clearMemory();
+    updateMemoryCount();
+    document.getElementById("memory-output").innerText = "Memory cleared.";
+    window.updateJavaStatusIndicator("Long-term memory cleared (IndexedDB + Wasm store).");
+};
+
+// ============================================================
+//  Multi-agent society  (Supervisor in Wasm drives JS LLM turns)
+// ============================================================
+async function runAgent(role, task, priorContext, paneId) {
+    const system = javaAppInstance.exports.agentSystemPrompt(role); // role prompt authored in Wasm
+    const user = priorContext ? `Task: ${task}\n\n${priorContext}` : `Task: ${task}`;
+    const pane = document.getElementById(paneId);
+    pane.textContent = "";
+    let text = "";
+    const stream = await llmEngine.chat.completions.create({
+        messages: [{ role: "system", content: system }, { role: "user", content: user }],
+        stream: true, temperature: 0.5, top_p: 0.9
+    });
+    for await (const chunk of stream) {
+        const word = chunk.choices[0]?.delta?.content || "";
+        text += word;
+        pane.textContent += word;
+        pane.scrollTop = pane.scrollHeight;
+    }
+    return text;
+}
+
+window.triggerAgentSociety = async function() {
+    if (!enginesReady()) return;
+    if (!llmEngine) { window.updateJavaStatusIndicator("WebGPU LLM required to run the agent society."); return; }
+    const task = document.getElementById("agent-task").value.trim();
+    if (!task) { window.updateJavaStatusIndicator("Describe a task for the agents."); return; }
+
+    ["agent-researcher", "agent-coder", "agent-critic", "agent-final"].forEach((id) => {
+        document.getElementById(id).textContent = "…";
+    });
+
+    const plan = javaAppInstance.exports.supervisorPlan(task);   // Supervisor (Wasm) plans the pipeline
+    window.updateJavaStatusIndicator(`Supervisor plan: [${plan}]. Researcher working...`);
+    const research = await runAgent("researcher", task, "", "agent-researcher");
+
+    window.updateJavaStatusIndicator("Coder agent working...");
+    const code = await runAgent("coder", task, "Requirements from the Researcher:\n" + research, "agent-coder");
+
+    window.updateJavaStatusIndicator("Critic agent reviewing...");
+    const critique = await runAgent("critic", task,
+        "Requirements:\n" + research + "\n\nProposed code:\n" + code, "agent-critic");
+
+    window.updateJavaStatusIndicator("Supervisor merging agent outputs...");
+    const report = javaAppInstance.exports.assembleFinal(task, research, code, critique); // Supervisor (Wasm) merges
+    document.getElementById("agent-final").textContent = report;
+    window.updateJavaStatusIndicator("Agent society finished.");
 };
 
 window.updateJavaStatusIndicator = function(status) {

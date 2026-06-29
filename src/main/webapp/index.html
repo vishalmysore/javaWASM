@@ -15,6 +15,13 @@
         #chat-output { background: #1e293b; padding: 1rem; border-radius: 6px; min-height: 100px; border-left: 4px solid #10b981; margin-top: 1rem; line-height: 1.5; }
         #doc-input { transition: border-color .15s, box-shadow .15s; }
         #doc-input.dragover { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,.45); background: #243049; }
+        #memory-output { background: #1e293b; padding: 1rem; border-radius: 6px; min-height: 60px; border-left: 4px solid #a855f7; margin-top: .75rem; line-height: 1.5; }
+        #memory-output pre { white-space: pre-wrap; margin: .4rem 0; color: #cbd5e1; }
+        .agent-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; margin-top: .5rem; }
+        .agent-label { font-weight: bold; margin: .5rem 0 .25rem; }
+        .agent-pane { background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: .6rem .75rem; white-space: pre-wrap; max-height: 220px; overflow: auto; font-size: .82rem; line-height: 1.4; color: #cbd5e1; }
+        #agent-final { border-left: 4px solid #a855f7; max-height: 340px; }
+        @media (max-width: 640px) { .agent-grid { grid-template-columns: 1fr; } }
         #wasm-log { background: #18120a; color: #fbbf24; font-family: monospace; font-size: 0.82rem; padding: 0.75rem 1rem; border-radius: 6px; border-left: 4px solid #f59e0b; margin: 0.5rem 0 1rem; max-height: 180px; overflow-y: auto; white-space: pre-wrap; }
         .file-row { display: flex; align-items: center; gap: 0.75rem; margin: 0.5rem 0; flex-wrap: wrap; }
         .muted { color: #94a3b8; font-size: 0.85rem; }
@@ -49,5 +56,27 @@
 
     <h3>Output Stream</h3>
     <div id="chat-output">System idle. Ingest a document and fire a question to stream results.</div>
+
+    <h3>🧠 Persistent Memory <span class="muted">(IndexedDB — survives closing the browser; no server)</span></h3>
+    <input type="text" id="memory-input" placeholder="Tell me something to remember, e.g. 'My project RecursiveMAS uses WebGPU'">
+    <button onclick="window.triggerRemember()">Remember</button>
+    <input type="text" id="memory-query" placeholder="Ask later, e.g. 'What was my architecture decision?'" style="margin-top:.75rem;">
+    <button onclick="window.triggerRecall()">Recall</button>
+    <div class="file-row" style="margin-top:.5rem;">
+        <span class="muted" id="memory-count">Memories stored: 0</span>
+        <button class="secondary" onclick="window.clearMemory()">Clear memory</button>
+    </div>
+    <div id="memory-output">No memories recalled yet. Remember a few facts, reload the page, then Recall — they persist.</div>
+
+    <h3>👥 Multi-Agent Society <span class="muted">(Supervisor → Researcher · Coder · Critic, all in-browser)</span></h3>
+    <input type="text" id="agent-task" placeholder="e.g. Build me a React app for expense tracking">
+    <button onclick="window.triggerAgentSociety()">Run Agent Society</button>
+    <div class="agent-grid">
+        <div><div class="agent-label">🔎 Researcher</div><pre id="agent-researcher" class="agent-pane">idle</pre></div>
+        <div><div class="agent-label">⌨️ Coder</div><pre id="agent-coder" class="agent-pane">idle</pre></div>
+        <div><div class="agent-label">🧐 Critic</div><pre id="agent-critic" class="agent-pane">idle</pre></div>
+    </div>
+    <div class="agent-label">🧩 Supervisor merge <span class="muted">(assembled in Java WasmGC)</span></div>
+    <pre id="agent-final" class="agent-pane">idle</pre>
 </body>
 </html>

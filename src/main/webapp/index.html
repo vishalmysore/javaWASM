@@ -22,6 +22,16 @@
         .agent-pane { background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: .6rem .75rem; white-space: pre-wrap; max-height: 220px; overflow: auto; font-size: .82rem; line-height: 1.4; color: #cbd5e1; }
         #agent-final { border-left: 4px solid #a855f7; max-height: 340px; }
         @media (max-width: 640px) { .agent-grid { grid-template-columns: 1fr; } }
+        #wasm-ui-root { margin-top: .5rem; }
+        .wasm-ui-note { font-size: .8rem; color: #94a3b8; margin-bottom: .6rem; }
+        .wasm-ui-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+        .wasm-ui-card { background: linear-gradient(160deg, #172033, #0f172a); border: 1px solid #334155; border-radius: 8px; padding: .8rem; text-align: center; }
+        .wasm-ui-value { font-size: 1.6rem; font-weight: 800; color: #38bdf8; }
+        .wasm-ui-label { font-size: .72rem; color: #94a3b8; margin-top: .25rem; }
+        .wasm-ui-barwrap { height: 12px; background: #1e293b; border-radius: 999px; overflow: hidden; margin: .6rem 0; border: 1px solid #334155; }
+        .wasm-ui-bar { height: 100%; width: 0; background: linear-gradient(90deg, #2563eb, #10b981); transition: width .3s; }
+        .wasm-ui-controls { display: flex; gap: .5rem; flex-wrap: wrap; }
+        @media (max-width: 640px) { .wasm-ui-grid { grid-template-columns: 1fr; } }
         #wasm-log { background: #18120a; color: #fbbf24; font-family: monospace; font-size: 0.82rem; padding: 0.75rem 1rem; border-radius: 6px; border-left: 4px solid #f59e0b; margin: 0.5rem 0 1rem; max-height: 180px; overflow-y: auto; white-space: pre-wrap; }
         .file-row { display: flex; align-items: center; gap: 0.75rem; margin: 0.5rem 0; flex-wrap: wrap; }
         .muted { color: #94a3b8; font-size: 0.85rem; }
@@ -41,6 +51,9 @@
         <div id="wasm-log">awaiting core boot...</div>
         <button class="secondary" onclick="window.verifyWasmCore()">🔍 Verify Java Wasm Core</button>
     </details>
+
+    <h3>🖥️ UI Built in WebAssembly <span class="muted">(this whole panel is created &amp; driven by Java/TeaVM)</span></h3>
+    <div id="wasm-ui-root"><span class="muted">Java will render this panel once the Wasm core boots…</span></div>
 
     <h3>1. Ingest Knowledge Document</h3>
     <div class="file-row">

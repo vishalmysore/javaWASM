@@ -77,6 +77,30 @@ public class RAGOrchestrator {
         return AgentSociety.assembleFinal(task, research, code, critique);
     }
 
+    // ----------------------------------------------------------------
+    // Rich UI built in WebAssembly (DOM constructed/driven by WasmUI).
+    // ----------------------------------------------------------------
+
+    @JSExport
+    public static void mountWasmUI() {
+        WasmUI.mount();
+    }
+
+    @JSExport
+    public static void refreshWasmUI() {
+        WasmUI.refresh();
+    }
+
+    /** Live doc-index size, read by the Java-built dashboard. */
+    static int docChunkCount() {
+        return db.size();
+    }
+
+    /** Deterministic cosine used by the dashboard's self-test button. */
+    static double selfTestCosineValue() {
+        return BrowserVectorDB.round4(db.cosineSimilarity(new float[] { 1f, 0f, 0f }, new float[] { 1f, 1f, 0f }));
+    }
+
     /**
      * Deterministic self-check executed entirely in Java/Wasm. Returns a string
      * built by the Wasm core and computes a known cosine value (~0.7071), so a

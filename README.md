@@ -23,6 +23,10 @@ The architecture is split into two cleanly separated layers:
 - **👥 Multi-agent society** — a Supervisor (in Wasm) plans the pipeline, defines
   each role's prompt, and merges the outputs of a Researcher, Coder, and Critic
   agent — all running on the local WebGPU SLM.
+- **🖥️ UI built in WebAssembly** — a live dashboard whose DOM is created and
+  driven entirely by Java (TeaVM JSO DOM): Java builds the elements, wires the
+  click handlers, and repaints the values/bar from the same business functions.
+  Demonstrates rich UI *in* Wasm alongside Java business logic.
 - **Observability** — a "Java Wasm Core Activity" panel shows lines emitted from
   inside the `.wasm` (chunk counts, cosine scores), plus a `selfTest()` button.
 

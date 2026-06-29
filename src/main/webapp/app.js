@@ -40,6 +40,9 @@ async function initializeHardwareRuntimes() {
         await initSqliteVec();
         await rehydrateMemory();
 
+        // Let the Java/Wasm core build its own UI panel (DOM + events from Java).
+        javaAppInstance.exports.mountWasmUI();
+
         // 2. Embedding model (Transformers.js, streamed from the HF CDN).
         window.updateJavaStatusIndicator(`Spawning Feature Extractor (${EMBED_MODEL_ID})...`);
         embeddingPipeline = await pipeline("feature-extraction", EMBED_MODEL_ID);
@@ -295,6 +298,7 @@ async function rehydrateMemory() {
 function updateMemoryCount() {
     const el = document.getElementById("memory-count");
     if (el && javaAppInstance) el.textContent = `Memories stored: ${javaAppInstance.exports.memoryCount()}`;
+    if (javaAppInstance) javaAppInstance.exports.refreshWasmUI(); // repaint the Java-built panel
 }
 
 function escapeHtml(s) {
@@ -456,6 +460,7 @@ window.triggerDocumentProcess = async function() {
     }
 
     const stored = javaAppInstance.exports.indexSize();
+    javaAppInstance.exports.refreshWasmUI(); // repaint the Java-built dashboard
     window.updateJavaStatusIndicator(`Indexing complete. ${stored} chunks stored securely in Wasm memory.`);
 };
 

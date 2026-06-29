@@ -50,7 +50,10 @@
                             <targetDirectory>${project.build.directory}/dist/wasm-gc</targetDirectory>
                             <targetType>WEBASSEMBLY_GC</targetType>
                             <optimizationLevel>ADVANCED</optimizationLevel>
-                            <minifying>true</minifying>
+                            <!-- Keep readable names + a debug section so the Java
+                                 functions are visible/inspectable in browser DevTools. -->
+                            <minifying>false</minifying>
+                            <debugInformationGenerated>true</debugInformationGenerated>
                         </configuration>
                     </execution>
                     <execution>

@@ -39,20 +39,26 @@ public class BrowserVectorDB {
 
         int step = Math.max(1, chunkSize - overlap);
         int start = 0;
+        int produced = 0;
         while (start < rawContent.length()) {
             int end = Math.min(start + chunkSize, rawContent.length());
             String textBlock = rawContent.substring(start, end).trim();
             if (!textBlock.isEmpty()) {
                 NativeAIBridge.emitChunk(textBlock);
+                produced++;
             }
             start += step;
         }
+        NativeAIBridge.logFromWasm("chunkAndEmit(): split " + rawContent.length()
+            + " chars into " + produced + " chunk(s) [window=" + chunkSize + ", overlap=" + overlap + "]");
     }
 
     /** Stores a chunk together with its precomputed embedding vector. */
     public void indexChunk(String text, float[] vector) {
         if (text == null || vector == null || vector.length == 0) return;
         index.add(new DocumentChunk(text, vector));
+        NativeAIBridge.logFromWasm("indexChunk(): vector #" + index.size()
+            + " stored (dim=" + vector.length + ", |v|=" + round4(magnitude(vector)) + ")");
     }
 
     public int size() {
@@ -69,19 +75,25 @@ public class BrowserVectorDB {
         List<DocumentChunk> matches = new ArrayList<>(index);
         // Sort explicitly by descending similarity values
         matches.sort((a, b) -> Double.compare(
-            calculateCosineSimilarity(b.vector, queryVector),
-            calculateCosineSimilarity(a.vector, queryVector)
+            cosineSimilarity(b.vector, queryVector),
+            cosineSimilarity(a.vector, queryVector)
         ));
 
         StringBuilder contextBuilder = new StringBuilder();
+        StringBuilder scoreLog = new StringBuilder();
         int limit = Math.min(topK, matches.size());
         for (int i = 0; i < limit; i++) {
             contextBuilder.append(matches.get(i).text).append("\n---\n");
+            if (i > 0) scoreLog.append(", ");
+            scoreLog.append(round4(cosineSimilarity(matches.get(i).vector, queryVector)));
         }
+        NativeAIBridge.logFromWasm("searchTopContext(): cosine-ranked " + matches.size()
+            + " vectors; top-" + limit + " similarity = [" + scoreLog + "]");
         return contextBuilder.toString();
     }
 
-    private double calculateCosineSimilarity(float[] vecA, float[] vecB) {
+    /** Cosine similarity of two equal-length vectors (pure Java, no libraries). */
+    public double cosineSimilarity(float[] vecA, float[] vecB) {
         if (vecA.length != vecB.length) return 0.0;
         double dotProduct = 0.0, normA = 0.0, normB = 0.0;
         for (int i = 0; i < vecA.length; i++) {
@@ -91,6 +103,17 @@ public class BrowserVectorDB {
         }
         if (normA == 0.0 || normB == 0.0) return 0.0;
         return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    private static double magnitude(float[] v) {
+        double sum = 0.0;
+        for (float x : v) sum += x * x;
+        return Math.sqrt(sum);
+    }
+
+    /** Rounds to 4 decimal places without relying on String.format (TeaVM-friendly). */
+    static double round4(double value) {
+        return Math.round(value * 10000.0) / 10000.0;
     }
 
     public void clearIndex() {

@@ -23,4 +23,12 @@ public class NativeAIBridge {
     /** Pushes a human-readable status line up to the UI. */
     @JSBody(params = { "status" }, script = "window.updateJavaStatusIndicator(status);")
     public static native void updateUIStatus(String status);
+
+    /**
+     * Emits a line into the "Java Wasm Core Activity" panel. Every call
+     * originates inside the compiled {@code .wasm}, so anything shown there is
+     * proof the WasmGC core executed.
+     */
+    @JSBody(params = { "line" }, script = "window.__wasmLog(line);")
+    public static native void logFromWasm(String line);
 }

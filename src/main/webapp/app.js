@@ -14,13 +14,17 @@ env.allowLocalModels = false;
 
 const EMBED_MODEL_ID = "Xenova/all-MiniLM-L6-v2";
 const LLM_MODEL_ID = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC"; // prebuilt in web-llm (incl. model_lib)
+const PDF_VER = "4.10.38"; // pinned pdf.js (ESM build) for PDF text extraction
 
 let embeddingPipeline = null;
 let llmEngine = null;
 let javaAppInstance = null;
 let pendingChunks = [];
+let pdfjsLib = null;
 
 async function initializeHardwareRuntimes() {
+    // Wire the file picker immediately (independent of the heavy model loads).
+    document.getElementById("file-input").addEventListener("change", (e) => loadFile(e.target.files[0]));
     try {
         // 1. Boot the Java Wasm core FIRST so chunking/index math is ready immediately.
         window.updateJavaStatusIndicator("Loading Java Wasm Application Core...");
@@ -58,6 +62,48 @@ async function computeEmbedding(text) {
     return Array.from(output.data);
 }
 
+// Extract text from a dropped/selected file (.pdf via pdf.js, otherwise plain text)
+// and drop it into the textarea so the existing Java pipeline can chunk + index it.
+async function loadFile(file) {
+    if (!file) return;
+    const name = (file.name || "").toLowerCase();
+    try {
+        let text;
+        if (name.endsWith(".pdf") || file.type === "application/pdf") {
+            text = await extractPdfText(file);
+        } else {
+            text = await file.text();
+        }
+        document.getElementById("doc-input").value = text;
+        window.updateJavaStatusIndicator(
+            `Loaded ${text.length} chars from "${file.name}". Click "Chunk & Index" to ingest.`);
+    } catch (err) {
+        console.error(err);
+        window.updateJavaStatusIndicator("File load error: " + (err && err.message ? err.message : err));
+    }
+}
+
+async function extractPdfText(file) {
+    if (!pdfjsLib) {
+        pdfjsLib = await import(`https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDF_VER}/build/pdf.min.mjs`);
+        // Load the worker via a same-origin blob that imports the pinned CDN worker
+        // (avoids cross-origin Worker restrictions on static hosts).
+        const workerUrl = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDF_VER}/build/pdf.worker.min.mjs`;
+        pdfjsLib.GlobalWorkerOptions.workerSrc =
+            URL.createObjectURL(new Blob([`import "${workerUrl}";`], { type: "text/javascript" }));
+    }
+    const data = new Uint8Array(await file.arrayBuffer());
+    const pdf = await pdfjsLib.getDocument({ data }).promise;
+    let out = "";
+    for (let p = 1; p <= pdf.numPages; p++) {
+        window.updateJavaStatusIndicator(`Extracting text: page ${p}/${pdf.numPages}...`);
+        const page = await pdf.getPage(p);
+        const content = await page.getTextContent();
+        out += content.items.map((it) => it.str).join(" ") + "\n\n";
+    }
+    return out.trim();
+}
+
 function enginesReady() {
     if (!javaAppInstance || !embeddingPipeline) {
         window.updateJavaStatusIndicator("Engines are still warming up — please wait a moment.");
@@ -69,6 +115,27 @@ function enginesReady() {
 // ---- Window bridges invoked FROM Java (@JSBody) ----
 window.__onChunk = function(text) {
     pendingChunks.push(text);
+};
+
+// Sink for log lines emitted from INSIDE the .wasm (proof the Java core ran).
+window.__wasmLog = function(line) {
+    const box = document.getElementById("wasm-log");
+    const stamp = new Date().toLocaleTimeString();
+    if (box.textContent === "awaiting core boot...") box.textContent = "";
+    box.textContent += `[${stamp}] ${line}\n`;
+    box.scrollTop = box.scrollHeight;
+    // Also surface in the console; the call stack originates in classes.wasm-runtime.js.
+    console.log("%c[JAVA→WASM]", "color:#f59e0b;font-weight:bold", line);
+};
+
+// Calls a deterministic Java/Wasm computation and shows the value it returns.
+window.verifyWasmCore = function() {
+    if (!javaAppInstance) {
+        window.updateJavaStatusIndicator("Java Wasm core not loaded yet.");
+        return;
+    }
+    const result = javaAppInstance.exports.selfTest(); // String built inside the .wasm
+    window.updateJavaStatusIndicator(result);
 };
 
 window.updateJavaStatusIndicator = function(status) {

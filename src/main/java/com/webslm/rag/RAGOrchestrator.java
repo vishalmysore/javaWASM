@@ -21,6 +21,22 @@ public class RAGOrchestrator {
 
     public static void main(String[] args) {
         NativeAIBridge.updateUIStatus("Java WasmGC Engine Mounted Successfully.");
+        NativeAIBridge.logFromWasm("main(): RAGOrchestrator booted inside WebAssembly GC.");
+    }
+
+    /**
+     * Deterministic self-check executed entirely in Java/Wasm. Returns a string
+     * built by the Wasm core and computes a known cosine value (~0.7071), so a
+     * correct result is proof the compiled Java is running.
+     */
+    @JSExport
+    public static String selfTest() {
+        float[] a = { 1f, 0f, 0f };
+        float[] b = { 1f, 1f, 0f };
+        double cos = BrowserVectorDB.round4(db.cosineSimilarity(a, b));
+        NativeAIBridge.logFromWasm("selfTest(): cosine([1,0,0],[1,1,0]) = " + cos + " (expected 0.7071)");
+        return "Java WasmGC core ALIVE — computed cosine([1,0,0],[1,1,0]) = " + cos
+            + " (expected 0.7071); chunks currently indexed = " + db.size();
     }
 
     /** Drops every indexed chunk. */
@@ -58,6 +74,7 @@ public class RAGOrchestrator {
     public static void executeRAGQuery(String queryText, String queryVectorCsv) {
         NativeAIBridge.updateUIStatus("Scanning local vector space...");
         float[] queryEmbedding = parseVector(queryVectorCsv);
+        NativeAIBridge.logFromWasm("executeRAGQuery(): parsed query embedding (dim=" + queryEmbedding.length + ")");
         String retrievedContext = db.searchTopContext(queryEmbedding, 3);
 
         String systemPersona = "You are an advanced domain-specific assistant. "

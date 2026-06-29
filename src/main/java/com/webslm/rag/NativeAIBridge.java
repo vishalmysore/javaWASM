@@ -31,4 +31,22 @@ public class NativeAIBridge {
      */
     @JSBody(params = { "line" }, script = "window.__wasmLog(line);")
     public static native void logFromWasm(String line);
+
+    // ---- sqlite-vec memory engine bridges (synchronous; in-memory DB) ----
+
+    /** Inserts a remembered fact + embedding (CSV) into the sqlite-vec store. */
+    @JSBody(params = { "text", "csv" }, script = "window.__vecInsert(text, csv);")
+    public static native void vecInsert(String text, String csv);
+
+    /** Runs a sqlite-vec KNN over the query embedding (CSV); returns top-K facts. */
+    @JSBody(params = { "csv", "k" }, script = "return window.__vecSearch(csv, k);")
+    public static native String vecSearch(String csv, int k);
+
+    /** Number of vectors currently in the sqlite-vec store. */
+    @JSBody(params = {}, script = "return window.__vecCount();")
+    public static native int vecCount();
+
+    /** Empties the sqlite-vec store. */
+    @JSBody(params = {}, script = "window.__vecClear();")
+    public static native void vecClear();
 }

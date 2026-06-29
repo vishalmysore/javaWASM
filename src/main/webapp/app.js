@@ -15,12 +15,16 @@ env.allowLocalModels = false;
 const EMBED_MODEL_ID = "Xenova/all-MiniLM-L6-v2";
 const LLM_MODEL_ID = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC"; // prebuilt in web-llm (incl. model_lib)
 const PDF_VER = "4.10.38"; // pinned pdf.js (ESM build) for PDF text extraction
+const EMBED_DIM = 384;     // Xenova/all-MiniLM-L6-v2 output dimension
+const SQLITE_VEC_URL = "https://cdn.jsdelivr.net/npm/sqlite-vec-wasm-demo@0.1.9/sqlite3.mjs";
 
 let embeddingPipeline = null;
 let llmEngine = null;
 let javaAppInstance = null;
 let pendingChunks = [];
 let pdfjsLib = null;
+let sqlite3Vec = null;
+let vecDB = null;
 
 async function initializeHardwareRuntimes() {
     // Wire the file picker + drag-and-drop immediately (independent of model loads).
@@ -32,7 +36,8 @@ async function initializeHardwareRuntimes() {
         javaAppInstance = await TeaVM.wasmGC.load("wasm-gc/classes.wasm");
         javaAppInstance.exports.main([]);
 
-        // Restore long-term memory from a previous session (IndexedDB -> Wasm store).
+        // Bring up the sqlite-vec engine, then restore memory from IndexedDB into it.
+        await initSqliteVec();
         await rehydrateMemory();
 
         // 2. Embedding model (Transformers.js, streamed from the HF CDN).
@@ -168,10 +173,69 @@ window.verifyWasmCore = function() {
 };
 
 // ============================================================
-//  Persistent long-term memory  (IndexedDB <-> Java vector store)
+//  Persistent long-term memory
+//  Engine: sqlite-vec (real KNN, in a WASM SQLite, driven by the Java core).
+//  Durability: IndexedDB stores {text, vector}; rehydrated into sqlite-vec on boot.
 // ============================================================
 const MEM_DB_NAME = "javawasm-memory";
 const MEM_STORE = "facts";
+
+// ---- sqlite-vec engine (called from the Java core via window.__vec* bridges) ----
+async function initSqliteVec() {
+    try {
+        const mod = await import(SQLITE_VEC_URL);
+        sqlite3Vec = await mod.default();
+        vecDB = new sqlite3Vec.oo1.DB(":memory:");
+        vecDB.exec("CREATE TABLE IF NOT EXISTS memories(id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, ts INTEGER)");
+        vecDB.exec("CREATE VIRTUAL TABLE IF NOT EXISTS vec_memories USING vec0(embedding float[" + EMBED_DIM + "])");
+        console.log("sqlite-vec ready:", vecDB.selectValue("select vec_version()"));
+    } catch (err) {
+        console.error("sqlite-vec init failed:", err);
+        window.updateJavaStatusIndicator("sqlite-vec init failed: " + (err && err.message ? err.message : err));
+    }
+}
+
+function csvToFloat32(csv) {
+    const parts = csv.split(",");
+    const f = new Float32Array(parts.length);
+    for (let i = 0; i < parts.length; i++) f[i] = parseFloat(parts[i]);
+    return f;
+}
+
+// Insert one fact + embedding. Embedding -> separate vec0 row (auto rowid),
+// text -> memories row keyed by that rowid.
+window.__vecInsert = function(text, csv) {
+    if (!vecDB) return;
+    const f = csvToFloat32(csv);
+    const ins = vecDB.prepare("INSERT INTO vec_memories(embedding) VALUES (?)");
+    try { ins.bind(1, f.buffer).step(); } finally { ins.finalize(); }
+    const rowid = vecDB.selectValue("select last_insert_rowid()");
+    vecDB.exec({ sql: "INSERT INTO memories(id, text, ts) VALUES (?, ?, ?)", bind: [rowid, text, Date.now()] });
+};
+
+// KNN over the query embedding; returns the top-K fact texts joined for the LLM.
+window.__vecSearch = function(csv, k) {
+    if (!vecDB) return "";
+    const f = csvToFloat32(csv);
+    const sql = "SELECT m.text AS text FROM vec_memories " +
+                "JOIN memories m ON m.id = vec_memories.rowid " +
+                "WHERE vec_memories.embedding MATCH ? AND k = " + (k | 0) + " ORDER BY distance";
+    const stmt = vecDB.prepare(sql);
+    const lines = [];
+    try { stmt.bind(1, f.buffer); while (stmt.step()) lines.push(stmt.get(0)); } finally { stmt.finalize(); }
+    return lines.join("\n---\n");
+};
+
+window.__vecCount = function() {
+    if (!vecDB) return 0;
+    return vecDB.selectValue("select count(*) from vec_memories") | 0;
+};
+
+window.__vecClear = function() {
+    if (!vecDB) return;
+    vecDB.exec("DELETE FROM vec_memories");
+    vecDB.exec("DELETE FROM memories");
+};
 
 function openMemoryDB() {
     return new Promise((resolve, reject) => {
@@ -221,7 +285,7 @@ async function rehydrateMemory() {
         }
         updateMemoryCount();
         if (facts.length) {
-            window.updateJavaStatusIndicator(`Restored ${facts.length} memory item(s) from IndexedDB into the Wasm vector store.`);
+            window.updateJavaStatusIndicator(`Restored ${facts.length} memory item(s) from IndexedDB into the sqlite-vec engine.`);
         }
     } catch (err) {
         console.warn("Memory rehydrate skipped:", err);
@@ -267,7 +331,7 @@ window.triggerRecall = async function() {
     const recalled = javaAppInstance.exports.recallMemory(vector.join(","), 3); // Java cosine recall
 
     const box = document.getElementById("memory-output");
-    box.innerHTML = `<b>Recalled from memory (IndexedDB → Wasm vector search):</b><pre>${escapeHtml(recalled) || "(nothing relevant)"}</pre>`;
+    box.innerHTML = `<b>Recalled via sqlite-vec KNN (driven by the Java core):</b><pre>${escapeHtml(recalled) || "(nothing relevant)"}</pre>`;
 
     if (llmEngine && recalled) {
         box.innerHTML += "<b>Assistant:</b> ";

@@ -15,9 +15,11 @@ The architecture is split into two cleanly separated layers:
 
 - **RAG over a document** — paste text or drop a `.pdf`/`.txt`; Java chunks it,
   Transformers.js embeds it, Java does the cosine retrieval, WebLLM answers.
-- **🧠 Persistent memory** — "Remember" facts and "Recall" them later. Vectors
-  are stored in **IndexedDB** and replayed into the Java vector store on every
-  boot, so memory survives closing the browser. No server, no database, no API.
+- **🧠 Persistent memory** — "Remember" facts and "Recall" them later. KNN runs
+  in **sqlite-vec** (a real vector-search SQLite extension compiled to WASM),
+  driven by the Java core; `{text, vector}` is persisted in **IndexedDB** and
+  rehydrated into sqlite-vec on every boot, so memory survives closing the
+  browser. No server, no database service, no API.
 - **👥 Multi-agent society** — a Supervisor (in Wasm) plans the pipeline, defines
   each role's prompt, and merges the outputs of a Researcher, Coder, and Critic
   agent — all running on the local WebGPU SLM.

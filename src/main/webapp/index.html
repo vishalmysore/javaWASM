@@ -57,7 +57,7 @@
     <h3>Output Stream</h3>
     <div id="chat-output">System idle. Ingest a document and fire a question to stream results.</div>
 
-    <h3>🧠 Persistent Memory <span class="muted">(IndexedDB — survives closing the browser; no server)</span></h3>
+    <h3>🧠 Persistent Memory <span class="muted">(sqlite-vec engine + IndexedDB — survives closing the browser; no server)</span></h3>
     <input type="text" id="memory-input" placeholder="Tell me something to remember, e.g. 'My project RecursiveMAS uses WebGPU'">
     <button onclick="window.triggerRemember()">Remember</button>
     <input type="text" id="memory-query" placeholder="Ask later, e.g. 'What was my architecture decision?'" style="margin-top:.75rem;">

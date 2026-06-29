@@ -20,9 +20,6 @@ public class RAGOrchestrator {
     /** Ephemeral per-session document index (RAG over an uploaded doc). */
     private static final BrowserVectorDB db = new BrowserVectorDB();
 
-    /** Long-term memory index. Rehydrated from IndexedDB by JS on every boot. */
-    private static final BrowserVectorDB memory = new BrowserVectorDB();
-
     public static void main(String[] args) {
         NativeAIBridge.updateUIStatus("Java WasmGC Engine Mounted Successfully.");
         NativeAIBridge.logFromWasm("main(): RAGOrchestrator booted inside WebAssembly GC.");
@@ -30,32 +27,34 @@ public class RAGOrchestrator {
     }
 
     // ----------------------------------------------------------------
-    // Persistent long-term memory (vectors persisted in IndexedDB by JS)
+    // Persistent long-term memory.
+    // The orchestrator (this class, in Wasm) drives the sqlite-vec engine
+    // through JS bridges; durable storage is IndexedDB (rehydrated on boot).
     // ----------------------------------------------------------------
 
-    /** Stores a remembered fact + its precomputed embedding in the memory store. */
+    /** Routes a remembered fact + its embedding into the sqlite-vec engine. */
     @JSExport
     public static void rememberFact(String text, String vectorCsv) {
-        memory.indexChunk(text, parseVector(vectorCsv));
-        NativeAIBridge.logFromWasm("rememberFact(): committed to long-term memory (total=" + memory.size() + ")");
+        NativeAIBridge.vecInsert(text, vectorCsv);
+        NativeAIBridge.logFromWasm("rememberFact(): committed to sqlite-vec engine (total=" + NativeAIBridge.vecCount() + ")");
     }
 
-    /** Cosine-recall of the most relevant remembered facts for a query embedding. */
+    /** Asks the sqlite-vec engine for the top-K nearest remembered facts. */
     @JSExport
     public static String recallMemory(String queryVectorCsv, int topK) {
-        NativeAIBridge.logFromWasm("recallMemory(): searching " + memory.size() + " long-term memories...");
-        return memory.searchTopContext(parseVector(queryVectorCsv), topK);
+        NativeAIBridge.logFromWasm("recallMemory(): sqlite-vec KNN over " + NativeAIBridge.vecCount() + " vectors (k=" + topK + ")");
+        return NativeAIBridge.vecSearch(queryVectorCsv, topK);
     }
 
     @JSExport
     public static int memoryCount() {
-        return memory.size();
+        return NativeAIBridge.vecCount();
     }
 
     @JSExport
     public static void clearMemory() {
-        memory.clearIndex();
-        NativeAIBridge.logFromWasm("clearMemory(): long-term memory wiped.");
+        NativeAIBridge.vecClear();
+        NativeAIBridge.logFromWasm("clearMemory(): sqlite-vec store emptied.");
     }
 
     // ----------------------------------------------------------------

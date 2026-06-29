@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Serverless Java-Wasm GPU RAG Sandbox</title>
+    <style>
+        body { font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+        textarea, input { width: 100%; background: #1e293b; border: 1px solid #334155; color: #f8fafc; padding: 0.75rem; border-radius: 6px; box-sizing: border-box; font-size: 1rem; }
+        button { background: #2563eb; color: white; border: none; padding: 0.75rem 1.5rem; font-weight: bold; border-radius: 6px; cursor: pointer; margin-top: 0.5rem; }
+        button:hover { background: #1d4ed8; }
+        #status-log { color: #38bdf8; font-family: monospace; padding: 1rem; background: #1e293b; border-radius: 6px; margin: 1rem 0; }
+        #chat-output { background: #1e293b; padding: 1rem; border-radius: 6px; min-height: 100px; border-left: 4px solid #10b981; margin-top: 1rem; line-height: 1.5; }
+    </style>
+    <!-- Include TeaVM generated Wasm-GC runtime library loader -->
+    <script type="text/javascript" src="wasm-gc/classes.wasm-runtime.js"></script>
+    <script type="module" src="app.js"></script>
+</head>
+<body>
+    <h2>🤖 Serverless Java-Wasm GPU RAG Sandbox</h2>
+    <div id="status-log">[System Status]: Initializing underlying client environments...</div>
+
+    <h3>1. Ingest Knowledge Document</h3>
+    <textarea id="doc-input" rows="6" placeholder="Paste comprehensive knowledge text baseline here..."></textarea>
+    <button onclick="window.triggerDocumentProcess()">Chunk &amp; Index Document via Java Wasm</button>
+
+    <h3>2. Query Engine</h3>
+    <input type="text" id="query-input" placeholder="Ask a targeted contextual domain question...">
+    <button onclick="window.triggerRAGSearch()">Execute Contextual WebGPU Query</button>
+
+    <h3>Output Stream</h3>
+    <div id="chat-output">System idle. Ingest a document and fire a question to stream results.</div>
+</body>
+</html>

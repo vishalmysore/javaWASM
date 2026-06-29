@@ -1,0 +1,55 @@
+name: Compile Java RAG to Wasm & Deploy
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build-and-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'maven'
+
+      - name: Compile Java to WasmGC via TeaVM
+        run: mvn clean package
+
+      - name: Stage Deployment Artifact Bundle
+        run: |
+          mkdir -p staging
+          cp src/main/webapp/index.html staging/
+          cp src/main/webapp/app.js staging/
+          cp -r target/dist/wasm-gc staging/
+          touch staging/.nojekyll
+
+      - name: Upload Static Web Bundle
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./staging
+
+  deploy-to-pages-cdn:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build-and-compile
+    steps:
+      - name: Broadcast directly to CDN Environment
+        id: deployment
+        uses: actions/deploy-pages@v4

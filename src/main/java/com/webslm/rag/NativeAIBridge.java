@@ -15,6 +15,10 @@ public class NativeAIBridge {
     @JSBody(params = { "text" }, script = "window.__onChunk(text);")
     public static native void emitChunk(String text);
 
+    /** Hands a sentence to JS for embedding during semantic context compression. */
+    @JSBody(params = { "text" }, script = "window.__onSentence(text);")
+    public static native void emitSentence(String text);
+
     /** Routes the assembled RAG prompt to the WebGPU SLM (WebLLM). */
     @JSBody(params = { "systemPrompt", "userQuery", "contextBlocks" },
             script = "window.streamSLMInference(systemPrompt, userQuery, contextBlocks);")

@@ -22,6 +22,7 @@ let embeddingPipeline = null;
 let llmEngine = null;
 let javaAppInstance = null;
 let pendingChunks = [];
+let pendingSentences = [];
 let pdfjsLib = null;
 let sqlite3Vec = null;
 let vecDB = null;
@@ -152,6 +153,11 @@ function enginesReady() {
 // ---- Window bridges invoked FROM Java (@JSBody) ----
 window.__onChunk = function(text) {
     pendingChunks.push(text);
+};
+
+// Java emits each sentence here during embedding-based (semantic) compression.
+window.__onSentence = function(text) {
+    pendingSentences.push(text);
 };
 
 // Sink for log lines emitted from INSIDE the .wasm (proof the Java core ran).
@@ -477,11 +483,48 @@ window.triggerRAGSearch = async function() {
     }
 
     window.updateJavaStatusIndicator("Computing embedding for user query...");
-    const vector = await computeEmbedding(query);
-    const compress = document.getElementById("compress-toggle").checked ? 1 : 0;
-    // Java retrieves context, optionally compresses it (Headroom-style), and routes to WebLLM.
-    javaAppInstance.exports.executeRAGQuery(query, vector.join(","), compress);
+    const qvec = await computeEmbedding(query);
+    const mode = document.getElementById("compress-mode").value; // off | lexical | semantic
+
+    let context;
+    if (mode === "semantic") {
+        context = await buildSemanticContext(qvec.join(","));
+    } else {
+        const flag = mode === "lexical" ? 1 : 0;
+        context = javaAppInstance.exports.buildContext(query, qvec.join(","), flag);
+    }
+
+    showRetrievedContext(context, mode);
+    // Java assembles the persona + streams via WebLLM with the (compressed) context.
+    javaAppInstance.exports.routeToSLM(query, context);
 };
+
+// Embedding-based compression: Java splits sentences + scores by cosine; JS embeds each.
+async function buildSemanticContext(queryCsv) {
+    pendingSentences = [];
+    window.updateJavaStatusIndicator("Retrieving + splitting context into sentences (Java)...");
+    javaAppInstance.exports.beginSemantic(queryCsv);
+    const total = pendingSentences.length;
+    for (let i = 0; i < total; i++) {
+        window.updateJavaStatusIndicator(`Embedding sentence ${i + 1}/${total} for semantic compression...`);
+        const sv = await computeEmbedding(pendingSentences[i]);
+        javaAppInstance.exports.addSentenceScore(sv.join(","));
+    }
+    return javaAppInstance.exports.finalizeSemantic(600);
+}
+
+// Feature 2: show exactly what the SLM received, after Java compression.
+function showRetrievedContext(context, mode) {
+    const view = document.getElementById("context-view");
+    if (view) {
+        const label = mode === "semantic" ? "semantic" : (mode === "lexical" ? "lexical" : "raw");
+        view.textContent = (context && context.length)
+            ? `[mode: ${label}, ${context.length} chars]\n\n${context}`
+            : "(no context retrieved)";
+    }
+    const details = document.getElementById("context-details");
+    if (details) details.open = true;
+}
 
 // Auto-boot on load
 window.addEventListener("DOMContentLoaded", initializeHardwareRuntimes);

@@ -1,5 +1,8 @@
 package com.webslm.rag;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.teavm.jso.JSExport;
 
 /**
@@ -146,35 +149,80 @@ public class RAGOrchestrator {
     /** Character budget for the Headroom-style Java context compressor. */
     private static final int COMPRESS_BUDGET = 600;
 
+    // --- Embedding-based (semantic) compression session state ---
+    private static final List<String> semSentences = new ArrayList<>();
+    private static final List<Double> semScores = new ArrayList<>();
+    private static float[] semQueryVec;
+    private static int semOriginalChars;
+
     /**
-     * Runs cosine-similarity retrieval against the precomputed query embedding,
-     * optionally compresses the retrieved context in Java (Headroom-style),
-     * assembles the structured prompt, and routes it to the WebGPU SLM.
+     * Retrieves the top-K context for a query and optionally compresses it in
+     * Java (Headroom-style, lexical). Returns the final context so JS can both
+     * display it ("what the SLM saw") and route it to the model.
      *
-     * @param compress 1 to run the Java context compressor, 0 to send raw context.
+     * @param compress 1 = lexical compression, 0 = raw context.
      */
     @JSExport
-    public static void executeRAGQuery(String queryText, String queryVectorCsv, int compress) {
-        NativeAIBridge.updateUIStatus("Scanning local vector space...");
-        float[] queryEmbedding = parseVector(queryVectorCsv);
-        NativeAIBridge.logFromWasm("executeRAGQuery(): parsed query embedding (dim=" + queryEmbedding.length + ")");
-        String retrievedContext = db.searchTopContext(queryEmbedding, 3);
-
-        String finalContext = retrievedContext;
+    public static String buildContext(String queryText, String queryVectorCsv, int compress) {
+        float[] qv = parseVector(queryVectorCsv);
+        String retrieved = db.searchTopContext(qv, 3);
         if (compress != 0) {
-            ContextCompressor.Result r = ContextCompressor.compress(queryText, retrievedContext, COMPRESS_BUDGET);
-            finalContext = r.text;
-            NativeAIBridge.logFromWasm("ContextCompressor: " + r.originalChars + " -> " + r.compressedChars
+            ContextCompressor.Result r = ContextCompressor.compress(queryText, retrieved, COMPRESS_BUDGET);
+            NativeAIBridge.logFromWasm("ContextCompressor[lexical]: " + r.originalChars + " -> " + r.compressedChars
                 + " chars (" + r.reductionPct() + "% smaller; kept " + r.keptSentences + "/" + r.totalSentences + " sentences)");
-            NativeAIBridge.updateUIStatus("Context compressed in Java: " + r.originalChars + " -> " + r.compressedChars
-                + " chars (" + r.reductionPct() + "% smaller). Routing to SLM...");
-        } else {
-            NativeAIBridge.updateUIStatus("Routing full (uncompressed) context to WebGPU SLM...");
+            return r.text;
         }
+        NativeAIBridge.logFromWasm("buildContext(): raw context (" + retrieved.length() + " chars, no compression)");
+        return retrieved;
+    }
 
+    /**
+     * Begins an embedding-based compression pass: retrieves context, splits it
+     * into sentences, and emits each to JS (which embeds them asynchronously and
+     * calls back into {@link #addSentenceScore}).
+     */
+    @JSExport
+    public static void beginSemantic(String queryVectorCsv) {
+        semSentences.clear();
+        semScores.clear();
+        semQueryVec = parseVector(queryVectorCsv);
+        String retrieved = db.searchTopContext(semQueryVec, 3);
+        semOriginalChars = retrieved.length();
+        List<String> sentences = ContextCompressor.splitForEmbedding(retrieved);
+        for (String s : sentences) {
+            semSentences.add(s);
+            NativeAIBridge.emitSentence(s);
+        }
+        NativeAIBridge.logFromWasm("beginSemantic(): split retrieved context into " + sentences.size() + " sentence(s) for embedding");
+    }
+
+    /** Receives one sentence embedding and scores it by cosine to the query (Java). */
+    @JSExport
+    public static void addSentenceScore(String sentenceVectorCsv) {
+        float[] v = parseVector(sentenceVectorCsv);
+        double sim = (semQueryVec == null) ? 0.0 : db.cosineSimilarity(semQueryVec, v);
+        semScores.add(sim);
+    }
+
+    /** Selects the best sentences by cosine score within a budget; returns context. */
+    @JSExport
+    public static String finalizeSemantic(int charBudget) {
+        double[] scores = new double[semScores.size()];
+        for (int i = 0; i < scores.length; i++) scores[i] = semScores.get(i);
+        ContextCompressor.Result r = ContextCompressor.select(semSentences, scores, charBudget, semOriginalChars);
+        NativeAIBridge.logFromWasm("ContextCompressor[semantic]: cosine-scored " + semSentences.size()
+            + " sentences; " + r.originalChars + " -> " + r.compressedChars + " chars ("
+            + r.reductionPct() + "% smaller; kept " + r.keptSentences + ")");
+        return r.text;
+    }
+
+    /** Routes the (possibly compressed) context + query to the WebGPU SLM. */
+    @JSExport
+    public static void routeToSLM(String queryText, String context) {
         String systemPersona = "You are an advanced domain-specific assistant. "
             + "Use only the provided context to answer the user request.";
-        NativeAIBridge.executeSLM(systemPersona, queryText, finalContext);
+        NativeAIBridge.updateUIStatus("Routing to WebGPU SLM context engine...");
+        NativeAIBridge.executeSLM(systemPersona, queryText, context);
     }
 
     private static float[] parseVector(String vectorCsv) {

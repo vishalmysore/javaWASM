@@ -65,8 +65,18 @@
 
     <h3>2. Query Engine</h3>
     <input type="text" id="query-input" placeholder="Ask a targeted contextual domain question...">
-    <label class="muted" style="display:block; margin:.5rem 0;"><input type="checkbox" id="compress-toggle" checked> 🗜️ Compress retrieved context in Java (Headroom-style) before the SLM</label>
+    <label class="muted" style="display:block; margin:.5rem 0;">🗜️ Context compression in Java (Headroom-style):
+        <select id="compress-mode">
+            <option value="off">Off (raw context)</option>
+            <option value="lexical" selected>Lexical (fast, term overlap)</option>
+            <option value="semantic">Semantic (embeddings, more robust)</option>
+        </select>
+    </label>
     <button onclick="window.triggerRAGSearch()">Execute Contextual WebGPU Query</button>
+    <details id="context-details" style="margin-top:.6rem;">
+        <summary class="muted" style="cursor:pointer;">👁️ Context the SLM actually saw (after Java compression)</summary>
+        <pre id="context-view" class="agent-pane">— run a query —</pre>
+    </details>
 
     <h3>Output Stream</h3>
     <div id="chat-output">System idle. Ingest a document and fire a question to stream results.</div>

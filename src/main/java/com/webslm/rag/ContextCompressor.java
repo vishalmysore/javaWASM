@@ -48,59 +48,71 @@ public final class ContextCompressor {
         }
     }
 
-    /** Compresses the retrieved context against the query, within a char budget. */
+    /** Lexical compression: scores sentences by query-term coverage, then selects. */
     public static Result compress(String query, String context, int charBudget) {
         if (context == null || context.isEmpty()) return new Result("", 0, 0, 0, 0);
-        int originalChars = context.length();
-
         List<String> sentences = splitSentences(context);
         Set<String> queryTerms = terms(query);
-        boolean hasQueryTerms = !queryTerms.isEmpty();
-
-        List<Scored> scored = new ArrayList<>();
+        double[] scores = new double[sentences.size()];
         for (int i = 0; i < sentences.size(); i++) {
-            scored.add(new Scored(i, sentences.get(i), score(sentences.get(i), queryTerms)));
+            scores[i] = score(sentences.get(i), queryTerms);
         }
-        // Most query-relevant first (stable sort keeps original order among ties).
-        scored.sort((a, b) -> Double.compare(b.score, a.score));
-
-        List<Scored> picked = new ArrayList<>();
-        List<Set<String>> pickedTokens = new ArrayList<>();
-        int used = 0;
-        for (Scored cand : scored) {
-            if (hasQueryTerms && cand.score <= 0.0 && !picked.isEmpty()) break; // stop once irrelevant
-            Set<String> toks = terms(cand.sentence);
-            boolean duplicate = false;
-            for (Set<String> prev : pickedTokens) {
-                if (jaccard(toks, prev) > 0.8) { duplicate = true; break; } // drop near-duplicates
-            }
-            if (duplicate) continue;
-            if (!picked.isEmpty() && used + cand.sentence.length() > charBudget) continue;
-            picked.add(cand);
-            pickedTokens.add(toks);
-            used += cand.sentence.length();
-            if (used >= charBudget) break;
-        }
-        if (picked.isEmpty() && !scored.isEmpty()) picked.add(scored.get(0)); // never return empty
-
-        // Restore original reading order for coherence.
-        picked.sort((a, b) -> Integer.compare(a.index, b.index));
-        StringBuilder sb = new StringBuilder();
-        for (Scored p : picked) sb.append(p.sentence.trim()).append(' ');
-        String out = sb.toString().trim();
-
-        return new Result(out, originalChars, out.length(), sentences.size(), picked.size());
+        return select(sentences, scores, charBudget, context.length());
     }
 
-    private static final class Scored {
-        final int index;
-        final String sentence;
-        final double score;
-        Scored(int index, String sentence, double score) {
-            this.index = index;
-            this.sentence = sentence;
-            this.score = score;
+    /** Exposes the (private) sentence splitter for the embedding-based path. */
+    public static List<String> splitForEmbedding(String context) {
+        return splitSentences(context == null ? "" : context);
+    }
+
+    /**
+     * Shared selection used by both compressors: rank sentences by score (desc),
+     * drop near-duplicates (Jaccard &gt; 0.8), fill a char budget, then restore
+     * reading order. The only difference between lexical and semantic compression
+     * is how {@code scores} were computed (term overlap vs cosine similarity).
+     */
+    public static Result select(List<String> sentences, double[] scores, int charBudget, int originalChars) {
+        int n = sentences.size();
+        if (n == 0) return new Result("", originalChars, 0, 0, 0);
+
+        boolean anyPositive = false;
+        for (int i = 0; i < n; i++) {
+            if (scoreAt(scores, i) > 0.0) { anyPositive = true; break; }
         }
+
+        List<Integer> order = new ArrayList<>();
+        for (int i = 0; i < n; i++) order.add(i);
+        order.sort((a, b) -> Double.compare(scoreAt(scores, b), scoreAt(scores, a)));
+
+        List<Integer> picked = new ArrayList<>();
+        List<Set<String>> pickedTokens = new ArrayList<>();
+        int used = 0;
+        for (int idx : order) {
+            if (anyPositive && scoreAt(scores, idx) <= 0.0 && !picked.isEmpty()) break;
+            String sentence = sentences.get(idx);
+            Set<String> toks = terms(sentence);
+            boolean duplicate = false;
+            for (Set<String> prev : pickedTokens) {
+                if (jaccard(toks, prev) > 0.8) { duplicate = true; break; }
+            }
+            if (duplicate) continue;
+            if (!picked.isEmpty() && used + sentence.length() > charBudget) continue;
+            picked.add(idx);
+            pickedTokens.add(toks);
+            used += sentence.length();
+            if (used >= charBudget) break;
+        }
+        if (picked.isEmpty()) picked.add(order.get(0)); // never return empty
+
+        picked.sort((a, b) -> Integer.compare(a, b)); // restore reading order
+        StringBuilder sb = new StringBuilder();
+        for (int idx : picked) sb.append(sentences.get(idx).trim()).append(' ');
+        String out = sb.toString().trim();
+        return new Result(out, originalChars, out.length(), n, picked.size());
+    }
+
+    private static double scoreAt(double[] scores, int i) {
+        return i < scores.length ? scores[i] : 0.0;
     }
 
     /** Distinct query-term coverage, lightly normalized to prefer dense sentences. */

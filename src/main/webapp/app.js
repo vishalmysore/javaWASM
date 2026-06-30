@@ -31,6 +31,7 @@ async function initializeHardwareRuntimes() {
     // Wire the file picker + drag-and-drop immediately (independent of model loads).
     document.getElementById("file-input").addEventListener("change", (e) => loadFile(e.target.files[0]));
     setupDragAndDrop();
+    setupSemanticMap();
     try {
         // 1. Boot the Java Wasm core FIRST so chunking/index math is ready immediately.
         window.updateJavaStatusIndicator("Loading Java Wasm Application Core...");
@@ -524,6 +525,54 @@ function showRetrievedContext(context, mode) {
     }
     const details = document.getElementById("context-details");
     if (details) details.open = true;
+}
+
+// ============================================================
+//  Semantic Map — Java computes PCA + k-means and draws on the canvas;
+//  JS only relays mouse coordinates so Java can hit-test points.
+// ============================================================
+window.renderSemanticMap = function() {
+    if (!javaAppInstance) { window.updateJavaStatusIndicator("Wasm core not ready yet."); return; }
+    javaAppInstance.exports.renderSemanticMap();
+    document.getElementById("map-detail").textContent = "Hover a point to preview its chunk; click to load it as a query.";
+};
+
+function mapCanvasCoords(e) {
+    const c = document.getElementById("map-canvas");
+    const r = c.getBoundingClientRect();
+    const x = (e.clientX - r.left) * (c.width / r.width);
+    const y = (e.clientY - r.top) * (c.height / r.height);
+    return [x, y];
+}
+
+function setupSemanticMap() {
+    const canvas = document.getElementById("map-canvas");
+    if (!canvas) return;
+    const tip = document.getElementById("map-tooltip");
+    canvas.addEventListener("mousemove", (e) => {
+        if (!javaAppInstance) return;
+        const [x, y] = mapCanvasCoords(e);
+        const text = javaAppInstance.exports.mapNearestText(x, y); // Java hit-test
+        if (text) {
+            tip.textContent = text.length > 200 ? text.slice(0, 200) + "…" : text;
+            tip.style.left = (e.offsetX + 14) + "px";
+            tip.style.top = (e.offsetY + 14) + "px";
+            tip.style.display = "block";
+        } else {
+            tip.style.display = "none";
+        }
+    });
+    canvas.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+    canvas.addEventListener("click", (e) => {
+        if (!javaAppInstance) return;
+        const [x, y] = mapCanvasCoords(e);
+        const text = javaAppInstance.exports.mapNearestText(x, y);
+        if (text) {
+            document.getElementById("query-input").value = text;
+            document.getElementById("map-detail").textContent =
+                "Loaded that chunk into the query box ↑ — hit \"Execute\" to ask about this region.";
+        }
+    });
 }
 
 // Auto-boot on load

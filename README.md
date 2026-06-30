@@ -29,6 +29,11 @@ The architecture is split into two cleanly separated layers:
 - **👥 Multi-agent society** — a Supervisor (in Wasm) plans the pipeline, defines
   each role's prompt, and merges the outputs of a Researcher, Coder, and Critic
   agent — all running on the local WebGPU SLM.
+- **🗺️ Semantic Map** — Java runs **PCA** (top-2 components via power iteration)
+  and **k-means**, from scratch, on the document's chunk embeddings, then draws an
+  interactive color-clustered 2D map on a `<canvas>` via TeaVM's Canvas API. Hover
+  a point to preview its chunk; click to load it as a query. Real ML + graphics,
+  all in the Wasm core.
 - **🖥️ UI built in WebAssembly** — a live dashboard whose DOM is created and
   driven entirely by Java (TeaVM JSO DOM): Java builds the elements, wires the
   click handlers, and repaints the values/bar from the same business functions.

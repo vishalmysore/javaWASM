@@ -65,6 +65,11 @@ public class BrowserVectorDB {
         return index.size();
     }
 
+    /** Live view of the indexed chunks (text + embedding), for the semantic map. */
+    public List<DocumentChunk> chunks() {
+        return index;
+    }
+
     /**
      * Ranks every indexed chunk by descending cosine similarity to the query
      * vector and assembles the top-K chunks into a structured context string.

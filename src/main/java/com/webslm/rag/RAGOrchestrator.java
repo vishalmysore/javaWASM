@@ -99,6 +99,20 @@ public class RAGOrchestrator {
         return db.size();
     }
 
+    // ----------------------------------------------------------------
+    // Semantic map: Java runs PCA + k-means and draws it on a canvas.
+    // ----------------------------------------------------------------
+
+    @JSExport
+    public static void renderSemanticMap() {
+        SemanticMap.render(db);
+    }
+
+    @JSExport
+    public static String mapNearestText(double x, double y) {
+        return SemanticMap.nearestText(x, y);
+    }
+
     /** Deterministic cosine used by the dashboard's self-test button. */
     static double selfTestCosineValue() {
         return BrowserVectorDB.round4(db.cosineSimilarity(new float[] { 1f, 0f, 0f }, new float[] { 1f, 1f, 0f }));

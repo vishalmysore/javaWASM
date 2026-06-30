@@ -81,6 +81,14 @@
     <h3>Output Stream</h3>
     <div id="chat-output">System idle. Ingest a document and fire a question to stream results.</div>
 
+    <h3>🗺️ Semantic Map <span class="muted">(PCA + k-means computed in Java/Wasm, drawn on canvas)</span></h3>
+    <button onclick="window.renderSemanticMap()">Render semantic map of indexed chunks</button>
+    <div style="position:relative; margin-top:.5rem;">
+        <canvas id="map-canvas" width="720" height="380" style="width:100%; display:block; background:#0f172a; border:1px solid #334155; border-radius:8px;"></canvas>
+        <div id="map-tooltip" style="position:absolute; display:none; pointer-events:none; background:#0b1220; border:1px solid #475569; color:#e2e8f0; font-size:.74rem; padding:.35rem .55rem; border-radius:6px; max-width:300px; z-index:5; line-height:1.35;"></div>
+    </div>
+    <div id="map-detail" class="muted" style="margin-top:.4rem;">Index a document, click "Render", then hover/click points.</div>
+
     <h3>🧠 Persistent Memory <span class="muted">(sqlite-vec engine + IndexedDB — survives closing the browser; no server)</span></h3>
     <input type="text" id="memory-input" placeholder="Tell me something to remember, e.g. 'My project RecursiveMAS uses WebGPU'">
     <button onclick="window.triggerRemember()">Remember</button>

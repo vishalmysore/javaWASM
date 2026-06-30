@@ -16,7 +16,9 @@ const EMBED_MODEL_ID = "Xenova/all-MiniLM-L6-v2";
 const LLM_MODEL_ID = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC"; // prebuilt in web-llm (incl. model_lib)
 const PDF_VER = "4.10.38"; // pinned pdf.js (ESM build) for PDF text extraction
 const EMBED_DIM = 384;     // Xenova/all-MiniLM-L6-v2 output dimension
-const SQLITE_VEC_URL = "https://cdn.jsdelivr.net/npm/sqlite-vec-wasm-demo@0.1.9/sqlite3.mjs";
+// sqlite-wasm-vec wraps the "bundler-friendly" official sqlite-wasm (which carries
+// the Emscripten 4.0.0 postRun fix), with sqlite-vec compiled in.
+const SQLITE_VEC_URL = "https://cdn.jsdelivr.net/npm/sqlite-wasm-vec@0.1.11/index.mjs";
 
 let embeddingPipeline = null;
 let llmEngine = null;
@@ -26,6 +28,8 @@ let pendingSentences = [];
 let pdfjsLib = null;
 let sqlite3Vec = null;
 let vecDB = null;
+let memEngine = "(initializing)";
+const jsMem = []; // JS cosine fallback store: { text, vec: Float32Array }
 
 async function initializeHardwareRuntimes() {
     // Wire the file picker + drag-and-drop immediately (independent of model loads).
@@ -198,10 +202,14 @@ async function initSqliteVec() {
         vecDB = new sqlite3Vec.oo1.DB(":memory:");
         vecDB.exec("CREATE TABLE IF NOT EXISTS memories(id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, ts INTEGER)");
         vecDB.exec("CREATE VIRTUAL TABLE IF NOT EXISTS vec_memories USING vec0(embedding float[" + EMBED_DIM + "])");
+        memEngine = "sqlite-vec";
         console.log("sqlite-vec ready:", vecDB.selectValue("select vec_version()"));
     } catch (err) {
-        console.error("sqlite-vec init failed:", err);
-        window.updateJavaStatusIndicator("sqlite-vec init failed: " + (err && err.message ? err.message : err));
+        // Don't let a WASM-engine failure kill memory — fall back to a JS cosine store.
+        vecDB = null;
+        memEngine = "JS cosine (fallback)";
+        console.warn("sqlite-vec unavailable; using JS cosine fallback:", err);
+        window.updateJavaStatusIndicator("Memory engine: JS cosine fallback (sqlite-vec WASM unavailable here).");
     }
 }
 
@@ -212,39 +220,55 @@ function csvToFloat32(csv) {
     return f;
 }
 
-// Insert one fact + embedding. Embedding -> separate vec0 row (auto rowid),
-// text -> memories row keyed by that rowid.
+function cosineJs(a, b) {
+    let dot = 0, na = 0, nb = 0;
+    const n = Math.min(a.length, b.length);
+    for (let i = 0; i < n; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+    return (na && nb) ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
+}
+
+// Insert one fact + embedding. sqlite-vec when available, else the JS fallback.
 window.__vecInsert = function(text, csv) {
-    if (!vecDB) return;
     const f = csvToFloat32(csv);
-    const ins = vecDB.prepare("INSERT INTO vec_memories(embedding) VALUES (?)");
-    try { ins.bind(1, f.buffer).step(); } finally { ins.finalize(); }
-    const rowid = vecDB.selectValue("select last_insert_rowid()");
-    vecDB.exec({ sql: "INSERT INTO memories(id, text, ts) VALUES (?, ?, ?)", bind: [rowid, text, Date.now()] });
+    if (vecDB) {
+        const ins = vecDB.prepare("INSERT INTO vec_memories(embedding) VALUES (?)");
+        try { ins.bind(1, f.buffer).step(); } finally { ins.finalize(); }
+        const rowid = vecDB.selectValue("select last_insert_rowid()");
+        vecDB.exec({ sql: "INSERT INTO memories(id, text, ts) VALUES (?, ?, ?)", bind: [rowid, text, Date.now()] });
+    } else {
+        jsMem.push({ text, vec: f });
+    }
 };
 
 // KNN over the query embedding; returns the top-K fact texts joined for the LLM.
 window.__vecSearch = function(csv, k) {
-    if (!vecDB) return "";
     const f = csvToFloat32(csv);
-    const sql = "SELECT m.text AS text FROM vec_memories " +
-                "JOIN memories m ON m.id = vec_memories.rowid " +
-                "WHERE vec_memories.embedding MATCH ? AND k = " + (k | 0) + " ORDER BY distance";
-    const stmt = vecDB.prepare(sql);
-    const lines = [];
-    try { stmt.bind(1, f.buffer); while (stmt.step()) lines.push(stmt.get(0)); } finally { stmt.finalize(); }
-    return lines.join("\n---\n");
+    if (vecDB) {
+        const sql = "SELECT m.text AS text FROM vec_memories " +
+                    "JOIN memories m ON m.id = vec_memories.rowid " +
+                    "WHERE vec_memories.embedding MATCH ? AND k = " + (k | 0) + " ORDER BY distance";
+        const stmt = vecDB.prepare(sql);
+        const lines = [];
+        try { stmt.bind(1, f.buffer); while (stmt.step()) lines.push(stmt.get(0)); } finally { stmt.finalize(); }
+        return lines.join("\n---\n");
+    }
+    const scored = jsMem.map((m) => ({ text: m.text, s: cosineJs(f, m.vec) }));
+    scored.sort((a, b) => b.s - a.s);
+    return scored.slice(0, k | 0).map((x) => x.text).join("\n---\n");
 };
 
 window.__vecCount = function() {
-    if (!vecDB) return 0;
-    return vecDB.selectValue("select count(*) from vec_memories") | 0;
+    if (vecDB) return vecDB.selectValue("select count(*) from vec_memories") | 0;
+    return jsMem.length;
 };
 
 window.__vecClear = function() {
-    if (!vecDB) return;
-    vecDB.exec("DELETE FROM vec_memories");
-    vecDB.exec("DELETE FROM memories");
+    if (vecDB) {
+        vecDB.exec("DELETE FROM vec_memories");
+        vecDB.exec("DELETE FROM memories");
+    } else {
+        jsMem.length = 0;
+    }
 };
 
 function openMemoryDB() {
@@ -342,7 +366,7 @@ window.triggerRecall = async function() {
     const recalled = javaAppInstance.exports.recallMemory(vector.join(","), 3); // Java cosine recall
 
     const box = document.getElementById("memory-output");
-    box.innerHTML = `<b>Recalled via sqlite-vec KNN (driven by the Java core):</b><pre>${escapeHtml(recalled) || "(nothing relevant)"}</pre>`;
+    box.innerHTML = `<b>Recalled via ${memEngine} KNN (driven by the Java core):</b><pre>${escapeHtml(recalled) || "(nothing relevant)"}</pre>`;
 
     if (llmEngine && recalled) {
         box.innerHTML += "<b>Assistant:</b> ";

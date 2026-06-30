@@ -478,8 +478,9 @@ window.triggerRAGSearch = async function() {
 
     window.updateJavaStatusIndicator("Computing embedding for user query...");
     const vector = await computeEmbedding(query);
-    // Java retrieves context (cosine similarity) and routes the prompt to WebLLM.
-    javaAppInstance.exports.executeRAGQuery(query, vector.join(","));
+    const compress = document.getElementById("compress-toggle").checked ? 1 : 0;
+    // Java retrieves context, optionally compresses it (Headroom-style), and routes to WebLLM.
+    javaAppInstance.exports.executeRAGQuery(query, vector.join(","), compress);
 };
 
 // Auto-boot on load

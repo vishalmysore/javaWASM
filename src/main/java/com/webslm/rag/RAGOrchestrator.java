@@ -143,21 +143,38 @@ public class RAGOrchestrator {
         return db.size();
     }
 
+    /** Character budget for the Headroom-style Java context compressor. */
+    private static final int COMPRESS_BUDGET = 600;
+
     /**
      * Runs cosine-similarity retrieval against the precomputed query embedding,
+     * optionally compresses the retrieved context in Java (Headroom-style),
      * assembles the structured prompt, and routes it to the WebGPU SLM.
+     *
+     * @param compress 1 to run the Java context compressor, 0 to send raw context.
      */
     @JSExport
-    public static void executeRAGQuery(String queryText, String queryVectorCsv) {
+    public static void executeRAGQuery(String queryText, String queryVectorCsv, int compress) {
         NativeAIBridge.updateUIStatus("Scanning local vector space...");
         float[] queryEmbedding = parseVector(queryVectorCsv);
         NativeAIBridge.logFromWasm("executeRAGQuery(): parsed query embedding (dim=" + queryEmbedding.length + ")");
         String retrievedContext = db.searchTopContext(queryEmbedding, 3);
 
+        String finalContext = retrievedContext;
+        if (compress != 0) {
+            ContextCompressor.Result r = ContextCompressor.compress(queryText, retrievedContext, COMPRESS_BUDGET);
+            finalContext = r.text;
+            NativeAIBridge.logFromWasm("ContextCompressor: " + r.originalChars + " -> " + r.compressedChars
+                + " chars (" + r.reductionPct() + "% smaller; kept " + r.keptSentences + "/" + r.totalSentences + " sentences)");
+            NativeAIBridge.updateUIStatus("Context compressed in Java: " + r.originalChars + " -> " + r.compressedChars
+                + " chars (" + r.reductionPct() + "% smaller). Routing to SLM...");
+        } else {
+            NativeAIBridge.updateUIStatus("Routing full (uncompressed) context to WebGPU SLM...");
+        }
+
         String systemPersona = "You are an advanced domain-specific assistant. "
             + "Use only the provided context to answer the user request.";
-        NativeAIBridge.updateUIStatus("Routing parameters to WebGPU SLM context engine...");
-        NativeAIBridge.executeSLM(systemPersona, queryText, retrievedContext);
+        NativeAIBridge.executeSLM(systemPersona, queryText, finalContext);
     }
 
     private static float[] parseVector(String vectorCsv) {

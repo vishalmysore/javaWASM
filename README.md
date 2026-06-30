@@ -15,6 +15,10 @@ The architecture is split into two cleanly separated layers:
 
 - **RAG over a document** — paste text or drop a `.pdf`/`.txt`; Java chunks it,
   Transformers.js embeds it, Java does the cosine retrieval, WebLLM answers.
+- **🗜️ Context compression (Java)** — a Headroom-inspired compression layer in
+  pure Java/Wasm trims the retrieved RAG context to the query-relevant sentences,
+  drops near-duplicates, and enforces a char budget before the SLM — cutting
+  tokens while keeping answer-bearing content. Toggle it on/off to compare.
 - **🧠 Persistent memory** — "Remember" facts and "Recall" them later. KNN runs
   in **sqlite-vec** (a real vector-search SQLite extension compiled to WASM),
   driven by the Java core; `{text, vector}` is persisted in **IndexedDB** and

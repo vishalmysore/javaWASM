@@ -16,6 +16,22 @@ This is not a thought experiment. Every claim here is backed by a deployed, open
 
 ---
 
+## Project Disclaimer & Intent
+
+My intention behind exploring this architecture is to push the boundaries of what is possible and challenge the traditional AI application model.
+
+The question I wanted to explore is: **can we move more intelligence and computation closer to the user?**
+
+Can edge computing evolve beyond servers? Can technologies like WebAssembly, WebGPU, WebRTC, and local AI models create a new era of applications where privacy, performance, and cost are balanced differently?
+
+This project is not about replacing cloud AI. Large-scale models and centralized infrastructure will continue to play a critical role. Instead, it is an exploration of what becomes possible when parts of the AI stack move from the cloud into the browser.
+
+The goal is to experiment with a future where applications can be more private, more resilient, and less dependent on backend infrastructure — while being honest about the current trade-offs around model size, hardware limitations, and browser maturity.
+
+The future may not be cloud versus edge. It may be a smarter balance between both.
+
+---
+
 ## 1. The problem with the current architecture
 
 The conventional AI stack has four structural taxes:
